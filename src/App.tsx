@@ -223,12 +223,12 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-900 flex justify-center items-center p-0 sm:p-4">
-      {/* Mobile Frame Container */}
-      <div className="relative w-full max-w-md min-h-[100dvh] sm:min-h-[844px] sm:max-h-[844px] sm:rounded-[3rem] overflow-hidden bg-white shadow-2xl flex flex-col border border-zinc-200">
+    <div className="min-h-[100dvh] w-full bg-white flex justify-center">
+      {/* Full-screen Mobile / Centered Desktop App Container */}
+      <div className="relative w-full max-w-md min-h-[100dvh] bg-white flex flex-col sm:shadow-lg sm:border-x sm:border-zinc-100">
         
-        {/* Top Header Bar */}
-        <header className="px-6 pt-6 pb-4 border-b border-zinc-100 flex items-center justify-between">
+        {/* Top Header Bar with iOS Safe Area support */}
+        <header className="px-6 pt-[calc(env(safe-area-inset-top,0px)+1rem)] pb-4 border-b border-zinc-100 flex items-center justify-between">
           {/* History Button with count badge */}
           <button
             onClick={() => setIsHistoryOpen(true)}
