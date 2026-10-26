@@ -50,6 +50,12 @@ export function App() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [outboundDuration, setOutboundDuration] = useState<number | null>(null);
 
+  // 4b. Dynamic Session States (Away from Home, Incomplete/Turned Back Early)
+  const [isAwayFromHome, setIsAwayFromHome] = useState(false);
+  const [activeStartLoc, setActiveStartLoc] = useState<GeoLocation | null>(null);
+  const [activeTurnaroundCoords, setActiveTurnaroundCoords] = useState<[number, number] | null>(null);
+  const [isIncompleteRun, setIsIncompleteRun] = useState(false);
+
   // 5. Drawers & Modals
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [setupModalType, setSetupModalType] = useState<'from' | 'to' | null>(null);
@@ -91,10 +97,12 @@ export function App() {
     };
   }, [phase]);
 
-  // Distance calculations
+  // Active Start & Turnaround endpoints
+  const activeStart = (phase !== 'ready' && activeStartLoc) ? activeStartLoc : locations.from;
+
   const distanceToHome =
-    locations.from && userCoords
-      ? calculateDistanceMeters(userCoords[0], userCoords[1], locations.from.lat, locations.from.lng)
+    activeStart && userCoords
+      ? calculateDistanceMeters(userCoords[0], userCoords[1], activeStart.lat, activeStart.lng)
       : 9999;
 
   const distanceToTurnaround =
@@ -102,29 +110,92 @@ export function App() {
       ? calculateDistanceMeters(userCoords[0], userCoords[1], locations.to.lat, locations.to.lng)
       : 9999;
 
-  const isAtHome = locations.from ? distanceToHome <= locations.from.radiusMeters : false;
+  const isAtHome = activeStart ? distanceToHome <= activeStart.radiusMeters : false;
   const isAtTurnaround = locations.to ? distanceToTurnaround <= locations.to.radiusMeters : false;
 
-  // STEP 1: START RUN (Must be at Home)
-  const handleStartRun = () => {
+  // STEP 1: START RUN (At Home or Away from Home)
+  const handleStartRun = (isAway: boolean = false) => {
+    if (!userCoords) {
+      setAlertModalInfo({
+        title: 'Acquiring GPS Signal',
+        message: 'Looking for your physical GPS coordinates. Please ensure location services are enabled.',
+      });
+      return;
+    }
+
     const now = Date.now();
+    let startPoint: GeoLocation;
+
+    if (isAway || !locations.from) {
+      startPoint = {
+        id: 'from',
+        name: isAway ? 'Start (Away)' : 'Home',
+        lat: userCoords[0],
+        lng: userCoords[1],
+        radiusMeters: 30,
+        timestamp: now,
+      };
+      setIsAwayFromHome(isAway);
+      setActiveStartLoc(startPoint);
+      if (!locations.from) {
+        saveFromLocation(startPoint);
+        setLocations((prev) => ({ ...prev, from: startPoint }));
+      }
+    } else {
+      setIsAwayFromHome(false);
+      setActiveStartLoc(locations.from);
+      startPoint = locations.from;
+    }
+
     setStartTimestamp(now);
     setElapsedSeconds(0);
     setOutboundDuration(null);
+    setTurnaroundTimestamp(null);
+    setActiveTurnaroundCoords(null);
+    setIsIncompleteRun(false);
     setPhase('outbound');
     triggerHaptic([120]);
   };
 
-  // STEP 2: REACH TURNAROUND (Must be at TO)
+  // STEP 2: REACH TURNAROUND (Pre-set TO or On-The-Fly Turnaround Registration)
   const handleReachTurnaround = () => {
+    if (!userCoords) return;
     const now = Date.now();
     setTurnaroundTimestamp(now);
     setOutboundDuration(elapsedSeconds);
+    setActiveTurnaroundCoords(userCoords);
+
+    // If Turnaround (TO) was not pre-configured, register current spot as the permanent TO!
+    if (!locations.to) {
+      const newTo: GeoLocation = {
+        id: 'to',
+        name: 'Turnaround',
+        lat: userCoords[0],
+        lng: userCoords[1],
+        radiusMeters: 30,
+        timestamp: now,
+      };
+      saveToLocation(newTo);
+      setLocations((prev) => ({ ...prev, to: newTo }));
+    }
+
     setPhase('inbound');
     triggerHaptic([100, 50, 100]);
   };
 
-  // STEP 3: END RUN (Must be back at Home)
+  // STEP 2b: TURN BACK EARLY (Incomplete Run)
+  const handleTurnBackEarly = () => {
+    if (!userCoords) return;
+    const now = Date.now();
+    setTurnaroundTimestamp(now);
+    setOutboundDuration(elapsedSeconds);
+    setActiveTurnaroundCoords(userCoords);
+    setIsIncompleteRun(true);
+    setPhase('inbound');
+    triggerHaptic([150, 80, 150]);
+  };
+
+  // STEP 3: END RUN (Return to Start Location)
   const handleEndRun = () => {
     const finishNow = Date.now();
     const start = startTimestamp || finishNow - elapsedSeconds * 1000;
@@ -138,15 +209,37 @@ export function App() {
     const outboundSecs = outboundDuration || Math.round((turnaround - start) / 1000);
     const inboundSecs = Math.max(0, finalSeconds - outboundSecs);
 
-    const legKm =
-      locations.from && locations.to
-        ? calculateDistanceMeters(
-            locations.from.lat,
-            locations.from.lng,
-            locations.to.lat,
-            locations.to.lng
-          ) / 1000
-        : 0;
+    const startLoc = activeStartLoc || locations.from;
+
+    let actualLegMeters = 0;
+    if (startLoc && activeTurnaroundCoords) {
+      actualLegMeters = calculateDistanceMeters(
+        startLoc.lat,
+        startLoc.lng,
+        activeTurnaroundCoords[0],
+        activeTurnaroundCoords[1]
+      );
+    } else if (startLoc && locations.to) {
+      actualLegMeters = calculateDistanceMeters(
+        startLoc.lat,
+        startLoc.lng,
+        locations.to.lat,
+        locations.to.lng
+      );
+    }
+
+    const actualKm = Number(((actualLegMeters * 2) / 1000).toFixed(2));
+
+    let plannedKm: number | undefined;
+    if (isIncompleteRun && startLoc && locations.to) {
+      const plannedLegMeters = calculateDistanceMeters(
+        startLoc.lat,
+        startLoc.lng,
+        locations.to.lat,
+        locations.to.lng
+      );
+      plannedKm = Number(((plannedLegMeters * 2) / 1000).toFixed(2));
+    }
 
     const newRecord: RunRecord = {
       id: finishNow.toString(),
@@ -175,9 +268,12 @@ export function App() {
       durationText: formatDuration(finalSeconds),
       outboundDurationText: formatDuration(outboundSecs),
       inboundDurationText: formatDuration(inboundSecs),
-      fromName: locations.from?.name || 'Home',
-      toName: locations.to?.name || 'Destination',
-      totalDistanceKm: legKm * 2,
+      fromName: startLoc?.name || 'Home',
+      toName: isIncompleteRun ? 'Turned Back Early' : (locations.to?.name || 'Turnaround'),
+      totalDistanceKm: actualKm,
+      isAwayFromHome,
+      isIncomplete: isIncompleteRun,
+      targetDistanceKm: plannedKm,
     };
 
     const updated = saveRunHistoryRecord(newRecord);
@@ -187,6 +283,10 @@ export function App() {
     setTurnaroundTimestamp(null);
     setElapsedSeconds(0);
     setOutboundDuration(null);
+    setIsAwayFromHome(false);
+    setActiveStartLoc(null);
+    setActiveTurnaroundCoords(null);
+    setIsIncompleteRun(false);
     triggerHaptic([200, 100, 200]);
     setIsHistoryOpen(true);
   };
@@ -197,6 +297,10 @@ export function App() {
     setTurnaroundTimestamp(null);
     setElapsedSeconds(0);
     setOutboundDuration(null);
+    setIsAwayFromHome(false);
+    setActiveStartLoc(null);
+    setActiveTurnaroundCoords(null);
+    setIsIncompleteRun(false);
   };
 
   const handleSaveLocation = (loc: GeoLocation) => {
@@ -281,7 +385,7 @@ export function App() {
         <main className="flex-1 px-5 overflow-y-auto">
           <RunCircuitView
             phase={phase}
-            fromLocation={locations.from}
+            fromLocation={activeStart}
             toLocation={locations.to}
             userCoords={userCoords || [0, 0]}
             elapsedSeconds={elapsedSeconds}
@@ -290,8 +394,11 @@ export function App() {
             distanceToTurnaround={distanceToTurnaround}
             isAtHome={isAtHome}
             isAtTurnaround={isAtTurnaround}
+            isAwayFromHome={isAwayFromHome}
+            isIncompleteRun={isIncompleteRun}
             onStartRun={handleStartRun}
             onReachTurnaround={handleReachTurnaround}
+            onTurnBackEarly={handleTurnBackEarly}
             onEndRun={handleEndRun}
             onResetRun={handleResetRun}
             onOpenSetup={(type) => setSetupModalType(type)}

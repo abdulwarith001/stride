@@ -25,4 +25,8 @@ export interface RunRecord {
   fromName: string;
   toName: string;
   totalDistanceKm: number;
+  isAwayFromHome?: boolean;
+  isIncomplete?: boolean;
+  targetDistanceKm?: number;
 }
+

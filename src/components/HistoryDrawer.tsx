@@ -108,9 +108,19 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
               >
                 {/* Date & Delete */}
                 <div className="flex items-center justify-between border-b border-zinc-200/60 pb-2.5">
-                  <div className="flex items-center space-x-2 text-xs font-bold text-zinc-800">
-                    <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+                  <div className="flex items-center flex-wrap gap-1.5 text-xs font-bold text-zinc-800">
+                    <Calendar className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
                     <span>{record.dateStr}</span>
+                    {record.isAwayFromHome && (
+                      <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-black text-[10px]">
+                        Away
+                      </span>
+                    )}
+                    {record.isIncomplete && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-black text-[10px]">
+                        Turned Back Early
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={() => onDeleteRecord(record.id)}
@@ -134,7 +144,7 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
                 {/* Times & Splits Breakdown */}
                 <div className="grid grid-cols-3 gap-2 pt-1 text-center bg-white rounded-xl p-2.5 border border-zinc-100">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-zinc-400">Start (Home)</span>
+                    <span className="text-[10px] uppercase font-bold text-zinc-400">Start</span>
                     <p className="text-xs font-mono font-bold text-zinc-800 mt-0.5">{record.startTimeStr}</p>
                   </div>
                   <div className="border-x border-zinc-100">
@@ -142,7 +152,7 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
                     <p className="text-xs font-mono font-bold text-[#FF5E00] mt-0.5">{record.turnaroundTimeStr}</p>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-zinc-400">Finish (Home)</span>
+                    <span className="text-[10px] uppercase font-bold text-zinc-400">Finish</span>
                     <p className="text-xs font-mono font-bold text-emerald-600 mt-0.5">{record.finishTimeStr}</p>
                   </div>
                 </div>
@@ -162,7 +172,9 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
                     </span>
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full bg-orange-100/70 text-[#FF5E00] font-black text-xs">
-                    {record.totalDistanceKm} km
+                    {record.isIncomplete && record.targetDistanceKm
+                      ? `${record.totalDistanceKm} / ${record.targetDistanceKm} km`
+                      : `${record.totalDistanceKm} km`}
                   </span>
                 </div>
               </div>
